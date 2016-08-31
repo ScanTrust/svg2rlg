@@ -1,1 +1,16 @@
 src/test/samples
+.idea/
+venv/
+venv3/
+tests/samples/download/
+build/
+dist/
+*.egg-info/
+*.egg
+*.py[cod]
+__pycache__/
+*~
+
+# Unit test / coverage reports
+.coverage
+.tox

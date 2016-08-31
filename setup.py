@@ -1,6 +1,7 @@
-"""SVGLIB"""
+# -*- coding: UTF-8 -*-
+from __future__ import print_function, absolute_import, unicode_literals
 
-from setuptools import setup
+from setuptools import setup, find_packages
 import glob
 import os.path
 import sys
@@ -19,36 +20,28 @@ def read(path):
     f.close()
     return text
 
+
 setup(
-    name='svglib3',
-    version='0.3.dev0',
-
+    name='svg2rlg',
+    version='1.0.1',
     install_requires=[
+        'reportlab>=3.0.0',
     ],
-
-    author='Sebastian Wehrmann, Dinu Gherman',
-    author_email='sebastian.wehrmann@icloud.com, gherman@darwin.in-berlin.de',
-    license='LGPL 3',
-    url='https://github.com/sweh/svglib',
-    package_dir={'svglib': 'src/svglib'},
-    packages=['svglib'],
+    author='ScanTrust, Sebastian Wehrmann, Dinu Gherman',
+    author_email='andrew.backer@scantrust.com, sebastian.wehrmann@icloud.com, gherman@darwin.in-berlin.de',
+    url='https://github.com/ScanTrust/svglib',
+    packages=find_packages(include=('svg2rlg',)),
     keywords='',
     classifiers="""\
         Development Status :: 4 - Beta
         Environment :: Console
         Intended Audience :: Developers
-        Intended Audience :: End Users/Desktop
-        License :: OSI Approved :: GNU General Public License (GPL)
         Natural Language :: English
         Operating System :: MacOS :: MacOS X
         Operating System :: Microsoft :: Windows
         Operating System :: POSIX
         Programming Language :: Python
-        Programming Language :: Python :: 2
-        Programming Language :: Python :: 2.6
         Programming Language :: Python :: 2.7
-        Programming Language :: Python :: 3
-        Programming Language :: Python :: 3.3
         Programming Language :: Python :: 3.4
         Programming Language :: Python :: 3.5
         Topic :: Documentation
