@@ -1,7 +1,7 @@
 # -*- coding: UTF-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
-from .main import data_to_rlg, file_to_rlg
+from .api import data_to_rlg, file_to_rlg
 
 __all__ = [
     'data_to_rlg',

@@ -1,4 +1,17 @@
 # -*- coding: UTF-8 -*-
+"""
+Contains the PUBLIC api for svg2rlg.  This should be imported & reexported in __init__.py and the entire svg2rlg module
+can be imported (or just one function)
+
+>>> import svg2rlg
+>>> svg2rlg.file_to_rlg(...)
+
+or
+
+>>> from svg2rlg import file_to_rlg
+
+"""
+
 from __future__ import print_function, absolute_import, unicode_literals
 
 import logging
