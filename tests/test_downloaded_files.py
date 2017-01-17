@@ -2,25 +2,18 @@
 # -*- coding: UTF-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
-import traceback
-import xml
-from unittest.case import skipIf, skip
-
-from tests.utils import fetch_file
-
 import os
-import sys
-import glob
 import re
-import gzip
-import urllib
-import tarfile
-from os.path import splitext, exists, join, basename, getsize
+import sys
+import traceback
 import unittest
+from os.path import basename
+from unittest.case import skipIf
 
-from reportlab.graphics import renderPDF, renderPM
+from requests.utils import unquote
 
 from svg2rlg import file_to_rlg
+from tests.utils import fetch_file
 
 try:
     DL_EXTRA = os.environ.get('DL', False)
@@ -28,26 +21,26 @@ try:
 except:
     DL_EXTRA = False
 
-files = {
-    "http://upload.wikimedia.org": [
-        "/wikipedia/commons/f/f7/Biohazard.svg",
-        "/wikipedia/commons/1/11/No_smoking_symbol.svg",
-        "/wikipedia/commons/b/b0/Dharma_wheel.svg",
-        "/wikipedia/commons/a/a7/Eye_of_Horus_bw.svg",
-        "/wikipedia/commons/1/17/Yin_yang.svg",
-        "/wikipedia/commons/a/a7/Olympic_flag.svg",
-        "/wikipedia/commons/4/46/Ankh.svg",
-        "/wikipedia/commons/5/5b/Star_of_life2.svg",
-        "/wikipedia/commons/9/97/Tudor_rose.svg"
-    ]
-}
-
 
 @skipIf(not DL_EXTRA, reason="You must set the DL env var to True to test this")
 class TestExternalFiles(unittest.TestCase):
+    files = {
+        "https://upload.wikimedia.org": [
+            "/wikipedia/commons/f/f7/Biohazard.svg",
+            "/wikipedia/commons/1/11/No_smoking_symbol.svg",
+            "/wikipedia/commons/b/b0/Dharma_wheel.svg",
+            "/wikipedia/commons/a/a7/Eye_of_Horus_bw.svg",
+            "/wikipedia/commons/1/17/Yin_yang.svg",
+            "/wikipedia/commons/a/a7/Olympic_flag.svg",
+            "/wikipedia/commons/4/46/Ankh.svg",
+            "/wikipedia/commons/5/5b/Star_of_life2.svg",
+            "/wikipedia/commons/9/97/Tudor_rose.svg"
+        ]
+    }
+
     def test_wikipedia_commons(self):
-        server = "http://upload.wikimedia.org"
-        for path in files[server]:
+        server = "https://upload.wikimedia.org"
+        for path in self.files[server]:
             local_file = fetch_file(server, path, "wiki-commons")
             file_to_rlg(local_file)
 
@@ -57,7 +50,7 @@ class WikipediaFlagsTestCase(unittest.TestCase):
     """
     Tests using SVG flags from Wikipedia.org.
     """
-    server = "http://en.wikipedia.org"
+    server = "https://en.wikipedia.org"
 
     found_flags = []
 
@@ -73,7 +66,6 @@ class WikipediaFlagsTestCase(unittest.TestCase):
 
         # Find the "a href = "/wiki/File:(flag name)" here
         pattern = r"upload.wikimedia.org(/wikipedia/commons/thumb/[^/]*/[^/]*/Flag_of_[^/]*\.svg)/"
-
         for (url, fn) in set([(u, unquote(basename(u))) for u in re.findall(pattern, flags_data)]):
             fn = re.sub("[^\w.]", '__', fn).lower().replace("flag_of_", "")
             url = url.replace("/thumb", "")
@@ -104,111 +96,16 @@ class WikipediaFlagsTestCase(unittest.TestCase):
 
                 self.fail(
                     (
-                        "Failed processing file '%s'\n" +
+                        "Failed processing file '{fn}'\n" +
                         "-------------------------------------------\n" +
-                        "%s" +
+                        "{tb}" +
                         "-------------------------------------------\n" +
-                        "%s"
-                        "-------------------------------------------\n" +
-                        "%s"
-                    ) % (
-                        filename, traceback.format_exc(), locals_dump, open(filename, 'rt').read()
+                        "{locals}"
+                    ).format(
+                        fn=filename, tb=traceback.format_exc(), locals=locals_dump,
                     )
                 )
 
-                # renderPDF.drawToFile(drawing, base, showBoundary=0)
-
-
-@skip("supid test")
-class W3CTestCase(unittest.TestCase):
-    def setUp(self):
-        """Check if testsuite archive exists, else download and unpack it."""
-
-        server = "http://www.w3.org"
-        path = "/Graphics/SVG/Test/20070907/W3C_SVG_12_TinyTestSuite.tar.gz"
-        url = server + path
-
-        archive_path = basename(url)
-        tarPath = splitext(archive_path)[0]
-        self.folderPath = join("samples", splitext(tarPath)[0])
-
-        if not exists(self.folderPath):
-            if not exists(join("samples", tarPath)):
-                if not exists(join("samples", archive_path)):
-                    print("downloading %s" % url)
-                    try:
-                        data = urllib.urlopen(url).read()
-                    except IOError as details:
-                        print(details)
-                        print("Check your internet connection and try again!")
-                        return
-                    archive_path = basename(url)
-                    open(join("samples", archive_path), "wb").write(data)
-                print("unpacking %s" % archive_path)
-                tar_data = gzip.open(join("samples", archive_path), "rb").read()
-                open(join("samples", tarPath), "wb").write(tar_data)
-            print("extracting into %s" % self.folderPath)
-            os.mkdir(self.folderPath)
-            tar_file = tarfile.TarFile(join("samples", tarPath))
-            tar_file.extractall(self.folderPath)
-            if exists(join("samples", tarPath)):
-                os.remove(join("samples", tarPath))
-
-    def test0(self):
-        """Test converting W3C SVG files to PDF using svglib."""
-
-        exclude_list = [
-            "paint-stroke-06-t.svg",
-        ]
-
-        paths = glob.glob("%s/svg/*.svg" % self.folderPath)
-        msg = "Destination folder '%s/svg' not found." % self.folderPath
-        self.failUnless(len(paths) > 0, msg)
-
-        for i, path in enumerate(paths):
-            print("working on [%d]" % i, path)
-
-            if basename(path) in exclude_list:
-                print("excluded (to be tested later)")
-                continue
-
-            # convert
-            try:
-                drawing = file_to_rlg(path)
-            except:
-                print("could not convert [%d]" % i, path)
-                continue
-
-            # save as PDF
-            base = splitext(path)[0] + '-generated.pdf'
-            try:
-                renderPDF.drawToFile(drawing, base, showBoundary=0)
-            except:
-                print("could not save as PDF [%d]" % i, path)
-
-                # save as PNG
-            # (endless loop for file paint-stroke-06-t.svg)
-            base = splitext(path)[0] + '-generated.png'
-            try:
-                renderPM.drawToFile(drawing, base, 'PNG')
-            except:
-                print("could not save as PNG [%d]" % i, path)
-                # outcommented, because many SVG samples seem to generate errors
-
-    def _test1(self):
-        """Test converting W3C SVG files to PDF using uniconverter."""
-
-        # skip test, if uniconv tool not found
-        if not os.popen("which uniconv").read().strip():
-            print("Uniconv not found, test skipped.")
-            return
-
-        paths = glob.glob("%s/svg/*" % self.folderPath)
-        paths = [p for p in paths
-                 if splitext(p.lower())[1] in [".svg", ".svgz"]]
-        for path in paths:
-            out = splitext(path)[0] + '-uniconv.pdf'
-            cmd = "uniconv '%s' '%s'" % (path, out)
-            os.popen(cmd).read()
-            if exists(out) and getsize(out) == 0:
-                os.remove(out)
+# -
+# todo: Add a test which downloads the W3C test suite
+#       https://www.w3.org/Graphics/SVG/Test/20070907/W3C_SVG_12_TinyTestSuite.tar.gz
