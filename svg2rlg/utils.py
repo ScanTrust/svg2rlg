@@ -1,13 +1,51 @@
 # -*- coding: utf-8 -*
 from __future__ import print_function, absolute_import, unicode_literals
 
+import bz2
+import gzip
+import logging
+import os
+
 import sys
 import re
+import zipfile
 from xml.dom.minidom import Element
 
 PY3 = sys.version_info[0] == 3
-TEXT_TYPE = str if PY3 else unicode
-BINARY_TYPE = bytes if PY3 else str
+
+if PY3:
+    import io
+
+    StringIO = io.StringIO
+    BytesIO = io.BytesIO
+
+    TEXT_TYPE = str
+    STRING_TYPE = str
+    BINARY_TYPE = bytes
+
+
+    def b(s):
+        return s.encode("latin-1")
+
+else:
+    import StringIO as _IO
+
+    StringIO = _IO.StringIO
+    BytesIO = _IO.StringIO
+
+    TEXT_TYPE = unicode
+    BINARY_TYPE = str
+    STRING_TYPE = basestring
+
+
+    def b(s):
+        return s
+
+_logger = logging.getLogger(__name__)
+
+
+def is_string(val):
+    return isinstance(val, STRING_TYPE)
 
 
 def enc(value):
@@ -223,3 +261,57 @@ def normalize_svg_path(attr):
                 res[i] = 'l'
 
     return res
+
+
+def _decomp_bz2(f):
+    """
+    Decompresses a BZ2 stream and returns an in-memory file-like object that can be read.
+    Working with BZ2 in python in 2&3 mode is a pain.
+    """
+    return BytesIO(bz2.decompress(f.read()))
+
+
+def decompress_fp(file_pointer):
+    """
+    Wraps a filepointer in a decompressing reader for BZ/GZ.  ZIP can be added, but its odder since it contains >1 file
+    so we must either restrict to 1 file in archive, or give a way to provide the internal filename.
+    """
+
+    assert hasattr(file_pointer, 'seek'), "decompress_fp: object passed does not look like a file (no seek method)"
+    assert hasattr(file_pointer, 'read'), "decompress_fp: object passed does not look like a file (no read method)"
+
+    # list of (magic bytes, class name, callable to pass the existing FP to)
+    magic = [
+        (b"\x1f\x8b\x08", gzip.GzipFile, lambda f: gzip.GzipFile(fileobj=f)),
+        (b"\x42\x5a\x68", bz2.BZ2File, lambda f: BytesIO(bz2.decompress(f.read())))
+    ]
+
+    _, compressed_types, _ = zip(*magic)
+
+    if isinstance(file_pointer, compressed_types):
+        return file_pointer
+
+    file_pointer.seek(0)
+    header = file_pointer.read(16)
+    file_pointer.seek(0)
+
+    for magic_val, klass, opener in magic:
+        if header.startswith(magic_val):
+            return opener(file_pointer)
+
+    return file_pointer
+
+
+def read_any(path_or_file):
+    """
+    Reads from either a file-like object or a string path pointing to a file (attempting to decompress).
+    """
+    if is_string(path_or_file):
+        if not os.path.exists(path_or_file):
+            raise Exception("File '%s' does not exist.  Unable to read SVG file" % path_or_file)
+
+        with open(path_or_file, 'rb') as f:
+            return decompress_fp(f).read()
+    else:
+        # if we try to combine them we risk double-uncompressing, or early closing of the FP if it was passed to us
+        return path_or_file.read()

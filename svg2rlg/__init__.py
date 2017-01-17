@@ -1,12 +1,13 @@
 # -*- coding: UTF-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
-from .main import svg2rlg
+from .main import data_to_rlg, file_to_rlg
 
 __all__ = [
-    'svg2rlg'
+    'data_to_rlg',
+    'file_to_rlg'
 ]
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 __license__ = "LGPL 3"
 __author__ = "Dinu Gherman"
 __date__ = "2010-03-01"

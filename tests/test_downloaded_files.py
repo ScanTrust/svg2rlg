@@ -18,16 +18,9 @@ import tarfile
 from os.path import splitext, exists, join, basename, getsize
 import unittest
 
-# noinspection PyUnresolvedReferences
-from six.moves.urllib.parse import urlparse, urlencode, unquote
-# noinspection PyUnresolvedReferences
-from six.moves.urllib.request import urlopen, urlretrieve
-# noinspection PyUnresolvedReferences
-from six.moves.urllib.error import HTTPError
-
 from reportlab.graphics import renderPDF, renderPM
 
-from svg2rlg import svg2rlg
+from svg2rlg import file_to_rlg
 
 try:
     DL_EXTRA = os.environ.get('DL', False)
@@ -56,7 +49,7 @@ class TestExternalFiles(unittest.TestCase):
         server = "http://upload.wikimedia.org"
         for path in files[server]:
             local_file = fetch_file(server, path, "wiki-commons")
-            svg2rlg(local_file)
+            file_to_rlg(local_file)
 
 
 @skipIf(not DL_EXTRA, reason="You must set the DL env var to True to test this")
@@ -96,7 +89,7 @@ class WikipediaFlagsTestCase(unittest.TestCase):
 
         for filename in self.found_flags:
             try:
-                svg2rlg(filename)
+                file_to_rlg(filename)
             except:
                 tb = sys.exc_info()[2]  # get the traceback (stack trace)
                 while tb.tb_next:  # find the last frame
@@ -119,7 +112,7 @@ class WikipediaFlagsTestCase(unittest.TestCase):
                         "-------------------------------------------\n" +
                         "%s"
                     ) % (
-                        filename, traceback.format_exc(), locals_dump, open(filename,'rt').read()
+                        filename, traceback.format_exc(), locals_dump, open(filename, 'rt').read()
                     )
                 )
 
@@ -181,7 +174,7 @@ class W3CTestCase(unittest.TestCase):
 
             # convert
             try:
-                drawing = svg2rlg(path)
+                drawing = file_to_rlg(path)
             except:
                 print("could not convert [%d]" % i, path)
                 continue

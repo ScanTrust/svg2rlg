@@ -8,6 +8,7 @@ import requests
 
 LOCAL_STORAGE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "samples", "download")
 
+
 def write_line(line):
     sys.stdout.write("%s \r" % line)
     sys.stdout.flush()

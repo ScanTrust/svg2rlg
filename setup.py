@@ -23,7 +23,7 @@ def read(path):
 
 setup(
     name='svg2rlg',
-    version='1.0.1',
+    version='1.1.0',
     install_requires=[
         'reportlab>=3.0.0',
     ],
