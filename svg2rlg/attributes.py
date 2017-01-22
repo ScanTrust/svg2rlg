@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*
 from __future__ import print_function, absolute_import, unicode_literals
 
-import re
 import logging
+import re
+
 from reportlab.lib import colors, units
 
-from . import utils
+from svg2rlg.utils import pad_list
+from . import utils, settings
 
 _logger = logging.getLogger(__name__)
 
@@ -28,10 +30,12 @@ def find(node, name):
 
     if value and value != "inherit":
         return value
+
     elif node.getAttribute("style"):
         attrs = utils.parse_multi_attribute_string(node.getAttribute("style"))
         if name in attrs:
             return attrs[name]
+
     else:
         if node.parentNode:
             return find(node.parentNode, name)
@@ -177,20 +181,23 @@ def convert_dash_offset(value):
 
 
 def convert_font_family(value):
-    # very hackish
-    font_mapping = {
-        "sans-serif": "Helvetica",
-        "serif": "Times-Roman",
-        "monospace": "Courier",
-    }
-    font_name = value
-    if not font_name:
-        return ''
-    try:
-        font_name = font_mapping[font_name]
-    except KeyError:
-        pass
-    if font_name not in ("Helvetica", "Times-Roman", "Courier"):
-        font_name = "Helvetica"
+    """
+    Converts a font-family to a standard font name, or returns the value unmodified.  PDFs are
+    expected to register their own font names, and the SVG must use this exact font name as well if it
+    is to be recognized later.  Verifying these names is beyond the scope of this function.
 
-    return font_name
+    > f("Arial")        == "Arial"
+    > f("'Arial-Bold'") == "Arial-Bold"
+    > f("sans-serif")   == "Helvetica" (unless overidden in settings)
+    > f("")             == "Helvetica" (unless overidden in settings)
+    """
+    value = value or settings.DEFAULT_FONT_FAMILY
+
+    # in svg-land, *Arial* is == 'Arial-Bold' (with the quotes)!
+    # <text fill="#000000" font-family="'Arial-Bold'" font-size="14">My Bold!</text>
+    value = value.replace("'", '')
+
+    if value in settings.FONT_FAMILY_MAPPING:
+        return settings.FONT_FAMILY_MAPPING[value]
+    else:
+        return settings.FONT_FAMILY_MAPPING[settings.DEFAULT_FONT_FAMILY]

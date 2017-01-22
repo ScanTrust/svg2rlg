@@ -315,3 +315,10 @@ def read_any(path_or_file):
     else:
         # if we try to combine them we risk double-uncompressing, or early closing of the FP if it was passed to us
         return path_or_file.read()
+
+
+def pad_list(v, desired_length, fill_value=None):
+    if len(v) < desired_length:
+        return v + [fill_value] * (desired_length - len(v))
+    else:
+        return v

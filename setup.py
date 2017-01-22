@@ -1,10 +1,12 @@
 # -*- coding: UTF-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
-from setuptools import setup, find_packages
-import glob
 import os.path
 import sys
+
+from setuptools import setup, find_packages
+
+import svg2rlg
 
 
 def project_path(*names):
@@ -23,7 +25,7 @@ def read(path):
 
 setup(
     name='svg2rlg',
-    version='1.1.0',
+    version=svg2rlg.VERISON,
     install_requires=[
         'reportlab>=3.0.0',
     ],
@@ -56,8 +58,9 @@ setup(
         'README.txt',
         'CHANGES.txt'
     )),
-
     include_package_data=True,
-    data_files=[('', glob.glob(project_path('*.txt')))],
+    data_files=[
+        ('svg2rlg', ['README.txt', 'CHANGES.txt']),
+    ],
     zip_safe=False,
 )

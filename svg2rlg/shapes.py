@@ -13,7 +13,7 @@ from reportlab.graphics.shapes import Line, Rect, Circle, Ellipse, Group, Polygo
 from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-from . import utils, attributes
+from . import utils, attributes, settings
 
 _logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ class ShapeConverter(object):
         dx0, dy0 = 0, 0
         x1, y1 = 0, 0
 
-        ff = attributes.convert_font_family(attributes.find(node, "font-family") or "Helvetica")
+        ff = attributes.convert_font_family(attributes.find(node, "font-family"))  # default is set inside convert_...
         fs = attributes.convert_length(attributes.find(node, "font-size") or "12")
 
         for c in node.childNodes:
