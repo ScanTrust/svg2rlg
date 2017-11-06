@@ -278,8 +278,12 @@ class ShapeConverter(object):
                 x1, y1, x2, y2, xn, yn = nums
                 pts += [xp + x1, yp + y1, xp + x2, yp + y2, xp + xn, yp + yn]
                 ops.append(OP_CURVETO)
+
             elif op == 's':
-                xp, yp, x0, y0 = pts[-4:]
+                if len(pts) < 4:
+                    xp, yp, x0, y0 = pts[-2:] * 2
+                else:
+                    xp, yp, x0, y0 = pts[-4:]
                 xi, yi = x0 + (x0 - xp), y0 + (y0 - yp)
                 x2, y2, xn, yn = nums
                 pts += [xi, yi, x0 + x2, y0 + y2, x0 + xn, y0 + yn]
