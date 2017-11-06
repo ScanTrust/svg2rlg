@@ -4,7 +4,7 @@ from __future__ import print_function, absolute_import, unicode_literals
 
 import os
 from os.path import dirname
-from svg2rlg import svg2rlg
+from svg2rlg import file_to_rlg
 
 BASE = os.path.join(dirname(__file__), "tests", "samples", "misc")
 
@@ -18,6 +18,6 @@ for filename in ['rllogo', 'circle_arc', 'car']:
     print("Reading", fn)
 
     print("  writing", out_fn(filename, "orig"))
-    drawing = svg2rlg(fn)
+    drawing = file_to_rlg(fn)
     drawing.save(fnRoot=out_fn(filename, "orig"))
 
