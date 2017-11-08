@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
+from svg2rlg.utils import monkeypatch_reportlab
 from .api import data_to_rlg, file_to_rlg
 
 __version__ = "1.1.2"
@@ -15,3 +16,5 @@ __all__ = [
     'file_to_rlg',
     'VERSION'
 ]
+
+monkeypatch_reportlab()

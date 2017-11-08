@@ -3,7 +3,7 @@ from __future__ import print_function, absolute_import, unicode_literals
 
 import unittest
 
-from svg2rlg import utils
+from svg2rlg import utils, attributes
 
 
 class TestUtils(unittest.TestCase):
@@ -20,7 +20,7 @@ class TestUtils(unittest.TestCase):
         }
         self.assertDictEqual(
             expected,
-            utils.parse_multi_attribute_string("fill: black; stroke: yellow")
+            attributes.parse_multi_attribute_string("fill: black; stroke: yellow")
         )
 
     def test_normalize_svg_path(self):

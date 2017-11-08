@@ -15,10 +15,9 @@ or
 from __future__ import print_function, absolute_import, unicode_literals
 
 import logging
-from xml.dom.minidom import parseString
 
-from .render import SvgRenderer
-from . import utils
+from . import utils, render
+from lxml import etree
 
 _logger = logging.getLogger(__name__)
 
@@ -30,18 +29,36 @@ def file_to_rlg(path_or_file):
     """
 
     data = utils.read_any(path_or_file)
-    return data_to_rlg(data)
+    return data_to_rlg(data, file_path=path_or_file)
 
 
-def data_to_rlg(data):
+def data_to_rlg(data, file_path=None):
     """
     Converts a string representation of an xml svg document to a RLG Drawing object.
     :rtype: reportlab.graphics.shapes.Drawing
     """
+    # noinspection PyUnresolvedReferences
 
-    renderer = SvgRenderer()
-    renderer.render(
-        parseString(data).documentElement
-    )
+    try:
+        parser = etree.XMLParser(remove_comments=True, recover=True)
+        svg = etree.fromstring(data, parser=parser)
+    except Exception as exc:
+        _logger.error("Failed to load input file! (%s)" % file_path)
+        raise
 
-    return renderer.finish()
+    renderer = render.SvgRenderer(file_path=file_path)
+    return renderer.render(svg)
+
+
+def __minidom_parser():
+    """
+    This is the old minidom parser, which doesn't quite work yet
+    since minidom doesn't support a lot of things like <use> resolution.
+    If that is fixed, then we can bring this back and drop lxml
+    """
+    pass
+    # renderer = SvgRenderer()
+    # renderer.render_node(
+    #     parseString(data).documentElement
+    # )
+    # return renderer.finish()

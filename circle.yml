@@ -1,0 +1,26 @@
+machine:
+  python:
+    version: 2.7.11
+
+  services:
+    - redis
+    - postgresql
+
+  environment:
+    DL: True
+
+dependencies:
+  pre:
+    - pip install --upgrade pip wheel
+  override:
+    - pip install -r requirements.txt
+  post:
+    - pip list --format=columns
+
+checkout:
+  post:
+    - uname -a
+
+test:
+  override:
+    - python -m unittest discover
