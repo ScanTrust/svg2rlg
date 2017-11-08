@@ -5,8 +5,9 @@ import logging
 import re
 
 from reportlab.lib import colors, units
+from reportlab.pdfgen.canvas import FILL_NON_ZERO, FILL_EVEN_ODD
 
-from svg2rlg.utils import pad_list
+from svg2rlg.utils import pad_list, enc, node_name
 from . import utils, settings
 
 _logger = logging.getLogger(__name__)
@@ -14,7 +15,7 @@ _logger = logging.getLogger(__name__)
 
 def find(node, name):
     """
-    Search an attribute with some name in some node or above.
+    Search an attribute with some name in some node OR ABOVE.
 
     First the node is searched, then its style attribute, then
     the search continues in the node's parent node. If no such
@@ -22,25 +23,35 @@ def find(node, name):
     """
 
     # This needs also to lookup values like "url(#SomeName)"...
+    attr_value = node.attrib.get(name, '').strip()
 
-    try:
-        value = node.getAttribute(name)
-    except:
-        return ''
-
-    if value and value != "inherit":
-        return value
-
-    elif node.getAttribute("style"):
-        attrs = utils.parse_multi_attribute_string(node.getAttribute("style"))
-        if name in attrs:
-            return attrs[name]
-
-    else:
-        if node.parentNode:
-            return find(node.parentNode, name)
+    if attr_value and attr_value != "inherit":
+        return attr_value
+    elif node.attrib.get("style"):
+        styles = parse_multi_attribute_string(node.attrib.get("style"))
+        if name in styles:
+            return styles[name]
+    elif node.getparent() is not None:
+        # recursively search up the tree for the attribute
+        return find(node.getparent(), name)
 
     return ''
+
+
+def get_all(node):
+    values = {}
+    if node_name(node.getparent()) == 'g':
+        values.update(get_all(node.getparent()))
+
+    style = node.attrib.get("style")
+    if style:
+        values.update(parse_multi_attribute_string(style))
+
+    for key, value in node.attrib.items():
+        if key != "style":
+            values[key] = value
+
+    return values
 
 
 def identity(value):
@@ -67,39 +78,50 @@ def convert_transform(value):
     for bi, bj in utils.pairwise(brackets):
         subline = line[bi + 1:bj].strip().replace(',', ' ')
         subline = re.sub("[ ]+", ',', subline)
-        indices.append(eval(subline))
+        if ',' in subline:
+            indices.append(tuple(float(num) for num in subline.split(',')))
+        else:
+            indices.append(float(subline))
         ops = ops[:bi] + ' ' * (bj - bi + 1) + ops[bj + 1:]
 
-    ops = ops.split()
+    ops = ops.replace(',', ' ').split()
 
     assert len(ops) == len(indices)
 
     return list(zip(ops, indices))
 
 
-def convert_length(svg_attr, percent_of=100):
+def convert_length(value, percent_of=100, em_base=12):
     """
     Convert length to points
     """
 
-    text = svg_attr
+    text = value
     if not text:
         return 0.0
+
+    if ' ' in text.replace(',', ' ').strip():
+        _logger.debug("Only getting first value of %s" % text)
+        text = text.replace(',', ' ').split()[0]
 
     if text[-1] == '%':
         _logger.debug("Fiddling length unit: %")
         return float(text[:-1]) / 100 * percent_of
     elif text[-2:] == "pc":
         return float(text[:-2]) * units.pica
+    elif text.endswith("pt"):
+        return float(text[:-2]) * 1.25
+    elif text.endswith("em"):
+        return float(text[:-2]) * em_base
+    elif text.endswith("px"):
+        return float(text[:-2])
 
-    new_size = text[:]
-    for u in "em ex px".split():
-        if new_size.find(u) >= 0:
-            _logger.debug("Ignoring unit: %s" % u)
-            new_size = new_size.replace(u, '')
+    if "ex" in text:
+        _logger.warn("Ignoring unit ex in '%s'" % value)
+        text = text.replace("ex", '')
 
-    new_size = new_size.strip()
-    length = units.toLength(new_size)
+    text = text.strip()
+    length = units.toLength(text)
 
     return length
 
@@ -115,9 +137,17 @@ def convert_opacity(value):
     return float(value)
 
 
+def convert_fill_rule(value):
+    return {
+        'nonzero': FILL_NON_ZERO,
+        'evenodd': FILL_EVEN_ODD,
+    }.get(value, '')
+
+
 def convert_color(value):
     """
     Convert string to a RL color object.
+    :type value: str | unicode
     """
 
     # fix it: most likely all "web colors" are allowed
@@ -134,28 +164,22 @@ def convert_color(value):
     text = utils.enc(text)
 
     if text in predefined.split():
-        return getattr(colors, text)
+        return getattr(colors, text)  # ??
     elif text == "currentColor":
         return "currentColor"
     elif len(text) == 7 and text[0] == '#':
         return colors.HexColor(text)
     elif len(text) == 4 and text[0] == '#':
         return colors.HexColor('#%s%s%s' % (text[1] * 2, text[2] * 2, text[3] * 2))
-    elif text[:3] == "rgb" and text.find('%') < 0:
-        t = text[:][3:]
-        t = t.replace('%', '')
-        tup = eval(t)
-        tup = tuple(map(lambda h: h[2:], map(hex, tup)))
-        tup = tuple(map(lambda h: (2 - len(h)) * '0' + h, tup))
-        col = "#%s%s%s" % tup
-        return colors.HexColor(col)
-    elif text[:3] == 'rgb' and text.find('%') >= 0:
-        t = text[:][3:]
-        t = t.replace('%', '')
-        tup = eval(t)
-        tup = tuple(map(lambda c: c / 100.0, tup))
-        c = colors.Color(*tup)
-        return c
+    elif text.startswith('rgb') and '%' not in text:
+        t = text[3:].strip('()')
+        hex_values = [hex(int(num))[2:] for num in t.split(',')]
+        hex_values = [h.zfill(2) for h in hex_values]
+        return colors.HexColor("#%s%s%s" % tuple(hex_values))
+    elif text.startswith('rgb') and '%' in text:
+        t = text[3:].replace('%', '').strip('()')
+        tup = (int(val) / 100.0 for val in t.split(','))
+        return colors.Color(*tup)
 
     _logger.debug("Can't handle color: %s" % text)
 
@@ -171,13 +195,11 @@ def convert_line_cap(value):
 
 
 def convert_dash_array(value):
-    stroke_dash_array = convert_length_list(value)
-    return stroke_dash_array
+    return convert_length_list(value)
 
 
 def convert_dash_offset(value):
-    stroke_dash_offset = convert_length(value)
-    return stroke_dash_offset
+    return convert_length(value)
 
 
 def convert_font_family(value):
@@ -191,13 +213,26 @@ def convert_font_family(value):
     > f("sans-serif")   == "Helvetica" (unless overidden in settings)
     > f("")             == "Helvetica" (unless overidden in settings)
     """
-    value = value or settings.DEFAULT_FONT_FAMILY
-
     # in svg-land, *Arial* is == 'Arial-Bold' (with the quotes)!
     # <text fill="#000000" font-family="'Arial-Bold'" font-size="14">My Bold!</text>
-    value = value.replace("'", '')
+    if not value:
+        return ''
 
-    if value in settings.FONT_FAMILY_MAPPING:
-        return settings.FONT_FAMILY_MAPPING[value]
-    else:
-        return settings.FONT_FAMILY_MAPPING[settings.DEFAULT_FONT_FAMILY]
+    # try to get the mapping, in case they used a built-in shortcut (e.g. sans-serif)
+    font_name = settings.FONT_MAP.get(value, value)
+
+    # ensure that the font name is one of the valid names from the map
+    if font_name not in settings.FONT_MAP.values():
+        font_name = settings.DEFAULT_FONT
+
+    return font_name
+
+
+def parse_multi_attribute_string(line):
+    """
+    Parse an attribute string in the format "name:value;name2:value2;name3:value3..." into a dict
+    """
+    line = enc(line)
+    pairs = [a.strip() for a in line.split(';') if a]
+    pairs = [[e.strip() for e in a.split(':')] for a in pairs]
+    return {k: v for k, v in pairs}

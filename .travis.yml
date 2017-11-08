@@ -1,0 +1,16 @@
+language: python
+python:
+ - 2.7
+ - 3.5
+ - 3.6
+
+env:
+  - DL=True
+
+install:
+  - pip install -r requirements.txt
+  - pip install -r requirements.test.txt
+
+
+script:
+  - python -m unittest discover

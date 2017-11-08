@@ -23,44 +23,45 @@ def read(path):
     return text
 
 
+install_requires = open('requirements.txt').read().strip().split()
+v = sys.version_info
+if (v.major, v.minor) < (2, 7):
+    install_requires.append('argparse')
+
 setup(
     name='svg2rlg',
     version=svg2rlg.VERISON,
-    install_requires=[
-        'reportlab>=3.0.0',
-    ],
-    author='ScanTrust, Sebastian Wehrmann, Dinu Gherman',
-    author_email='andrew.backer@scantrust.com, sebastian.wehrmann@icloud.com, gherman@darwin.in-berlin.de',
-    url='https://github.com/ScanTrust/svglib',
+    install_requires=install_requires,
+    author='Sebastian Wehrmann, Dinu Gherman, Deeplook, ScanTrust',
+    author_email='sebastian.wehrmann@icloud.com, gherman@darwin.in-berlin.de, andrew.backer@scantrust.com',
+    url='https://github.com/ScanTrust/svg2rlg',
     packages=find_packages(include=('svg2rlg',)),
     keywords='',
-    classifiers="""\
-        Development Status :: 4 - Beta
-        Environment :: Console
-        Intended Audience :: Developers
-        Natural Language :: English
-        Operating System :: MacOS :: MacOS X
-        Operating System :: Microsoft :: Windows
-        Operating System :: POSIX
-        Programming Language :: Python
-        Programming Language :: Python :: 2.7
-        Programming Language :: Python :: 3.4
-        Programming Language :: Python :: 3.5
-        Topic :: Documentation
-        Topic :: Multimedia :: Graphics :: Graphics Conversion
-        Topic :: Printing
-        Topic :: Software Development :: Libraries :: Python Modules
-        Topic :: Text Processing :: Markup :: XML
-        Topic :: Utilities
-"""[:-1].split('\n'),
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Environment :: Console',
+        'Intended Audience :: End Users/Desktop',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: GNU General Public License (GPL)',
+        'Operating System :: MacOS :: MacOS X',
+        'Operating System :: POSIX',
+        'Natural Language :: English',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
+        'Topic :: Documentation',
+        'Topic :: Utilities',
+        'Topic :: Printing',
+        'Topic :: Multimedia :: Graphics :: Graphics Conversion',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+        'Topic :: Text Processing :: Markup :: XML',
+    ],
     description="An experimental library for reading and converting SVG. Python 3 compatible.",
-    long_description='\n\n'.join(read(project_path(name)) for name in (
-        'README.txt',
-        'CHANGES.txt'
-    )),
+    long_description=open('README.rst').read(),
     include_package_data=True,
     data_files=[
-        ('svg2rlg', ['README.txt', 'CHANGES.txt']),
+        ('svg2rlg', ['README.rst', 'CONTRIBUTORS.rst']),
     ],
     zip_safe=False,
 )

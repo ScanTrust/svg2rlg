@@ -6,13 +6,20 @@ import hashlib
 import logging
 import os
 import re
+import tempfile
+from functools import partial
 from os.path import dirname
 from xml.dom.minidom import Element
 
+import itertools
 from reportlab.graphics.shapes import Line, Rect, Circle, Ellipse, Group, Polygon, PolyLine, String, Path, Image, Shape
 from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfgen.canvas import FILL_NON_ZERO, FILL_EVEN_ODD
+from reportlab.pdfgen.pdfimages import PDFImage
 
+from svg2rlg.paths import NoStrokePath
+from svg2rlg.utils import node_name, node_attr
 from . import utils, attributes, settings
 
 _logger = logging.getLogger(__name__)
@@ -51,8 +58,13 @@ class ShapeConverter(object):
     Converter from SVG shapes to RLG (ReportLab Graphics) shapes.
     """
 
-    def __init__(self):
-        self.svgSourceFile = ''
+    def __init__(self, file_path):
+        """
+        :param file_path: Path to the original file, used to resolve images/external files
+        :type file_path: str| None
+        """
+        self.preserve_space = False
+        self.svg_source_file = file_path
 
     def get_handled_shapes(self):
         """
@@ -65,13 +77,42 @@ class ShapeConverter(object):
         return [k[8:].lower() for k in keys if k.startswith("convert_")]
 
     def _get_length(self, node, attribute):
-        return attributes.convert_length(node.getAttribute(attribute))
+        return attributes.convert_length(node_attr(node, attribute))
 
     def _length_attrs(self, node, *args):
         return tuple(self._get_length(node, v) for v in args)
 
     def _length_attrs_dict(self, node, *args):
         return {v: self._get_length(node, v) for v in args}
+
+    def convert(self, node, clipping=None):
+        """
+        Converts any supported node to a reportlab shape.
+
+        :type node: reportlab.shapes.Shape
+        :type clipping: svg2rlg.paths.ClippingPath
+        """
+        name = node_name(node).lower()
+        method_name = "convert_%s" % name.lower()
+        shape = getattr(self, method_name)(node)
+        if not shape:
+            return
+
+        if name not in ('path', 'polyline', 'text'):
+            # Only apply style where the convert method did not apply it.
+            self.apply_style(shape, node)
+
+        transform = node_attr(node, "transform")
+        if not (transform or clipping):
+            return shape
+        else:
+            group = Group()
+            if transform:
+                self.apply_transform(transform, group)
+            if clipping:
+                group.add(clipping)
+            group.add(shape)
+            return group
 
     def convert_line(self, node):
         return Line(
@@ -91,55 +132,68 @@ class ShapeConverter(object):
 
     def convert_ellipse(self, node):
         return Ellipse(
+            # rx = width, ry = height
             *self._length_attrs(node, "cx", "cy", "rx", "ry")
         )
 
     def convert_polyline(self, node):
-        points = attributes.convert_length_list(node.getAttribute("points"))
+        points = attributes.convert_length_list(node_attr(node, "points"))
+        has_fill = node_attr(node, 'fill') not in ('', 'none')
 
-        # Need to use two shapes, because standard RLG polylines do not support filling...
-        gr = Group()
-        shape = Polygon(points)
-        self.apply_style(shape, node)
-        shape.strokeColor = None
-        gr.add(shape)
-        shape = PolyLine(points)
-        self.apply_style(shape, node)
-        gr.add(shape)
+        if len(points) % 2 != 0 or len(points) == 0:
+            _logger.warn("Invalid Polyline points: %s" % points)
+            return None
 
-        return gr
+        polyline = PolyLine(points)
+        self.apply_style(polyline, node)
+
+        if has_fill:
+            # Need to use two shapes, because standard RLG polylines do not support filling...
+            # Polygon is the same as the polyline but without a border (stroke)
+            gr = Group()
+            polygon = Polygon(points)
+            self.apply_style(polygon, node)
+            polygon.strokeColor = None
+            gr.add(polygon)
+            gr.add(polyline)
+            return gr
+        else:
+            return polyline
 
     def convert_polygon(self, node):
-        points = attributes.convert_length_list(node.getAttribute("points"))
+        points = attributes.convert_length_list(node_attr(node, "points"))
+        if len(points) % 2 != 0 or len(points) == 0:
+            _logger.warn("Invalid Polygon points: %s" % points)
+            return None
+
         return Polygon(points)
 
-    def convert_text_0(self, node):
-        text = ''
-        if node.firstChild.nodeValue:
-            try:
-                text = utils.enc(node.firstChild.nodeValue)
-            except:
-                text = "Unicode"
+    def clean_text(self, text, preserve_space):
+        """
+        Text cleaning as per https://www.w3.org/TR/SVG/text.html#WhiteSpace
+        """
+        if text is None:
+            return
 
-        x, y = (attributes.convert_length(node.getAttribute(v) or '0') for v in ['x', 'y'])
-        shape = String(x, y, text)
-        self.apply_style(shape, node)
-        gr = Group()
-        gr.add(shape)
-        gr.scale(1, -1)
-        gr.translate(0, -2 * y)
-
-        return gr
+        # todo: this doesn't seem quite right, this replacement logic
+        if preserve_space:
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\t', ' ')
+        else:
+            text = text.replace('\r\n', '').replace('\n', '').replace('\t', ' ')
+            text = text.strip()
+            while '  ' in text:
+                text = text.replace('  ', ' ')
+        return text
 
     def convert_text(self, node):
         """
         Converts a <text> element
-        :type node: Element
         """
+
         x, y = self._length_attrs(node, 'x', 'y')
+        preserve_space = utils.node_preserve_space(node, self.preserve_space)
 
         gr = Group()
-        frags = []
         frag_lengths = []
 
         dx0, dy0 = 0, 0
@@ -147,273 +201,248 @@ class ShapeConverter(object):
 
         ff = attributes.convert_font_family(attributes.find(node, "font-family"))  # default is set inside convert_...
         fs = attributes.convert_length(attributes.find(node, "font-size") or "12")
+        convert_len = partial(attributes.convert_length, em_base=fs)
 
-        for c in node.childNodes:
-            base_line_shift = 0
-
-            if c.nodeType == c.TEXT_NODE:
-                frags.append(c.nodeValue)
-                try:
-                    tx = ''.join(frags)
-                except:
-                    tx = ""
-
-            elif c.nodeType == c.ELEMENT_NODE and c.nodeName == "tspan":
-                frags.append(c.firstChild.nodeValue)
-                tx = ''.join([chr(ord(f)) for f in frags[-1]])
-                y1, dx, dy = self._length_attrs(node, 'y', 'dx', 'dy')
+        for c in itertools.chain([node], node.getchildren()):
+            has_x, has_y = False, False
+            dx, dy = 0, 0
+            baseline_shift = 0
+            if node_name(c) == 'text':
+                text = self.clean_text(c.text, preserve_space)
+                if not text:
+                    continue
+            elif node_name(c) == 'tspan':
+                text = self.clean_text(c.text, preserve_space)
+                if not text:
+                    continue
+                x1, y1, dx, dy = [c.attrib.get(name, '') for name in ("x", "y", "dx", "dy")]
+                has_x, has_y = (x1 != '', y1 != '')
+                x1, y1, dx, dy = map(convert_len, (x1, y1, dx, dy))
                 dx0 = dx0 + dx
                 dy0 = dy0 + dy
-                base_line_shift = node.getAttribute("baseline-shift") or "0"
-
-                if base_line_shift in ("sub", "super", "baseline"):
-                    base_line_shift = {"sub": -fs / 2, "super": fs / 2, "baseline": 0}[base_line_shift]
+                baseline_shift = c.attrib.get("baseline-shift", '0')
+                if baseline_shift in ("sub", "super", "baseline"):
+                    baseline_shift = {"sub": -fs / 2, "super": fs / 2, "baseline": 0}[baseline_shift]
                 else:
-                    base_line_shift = attributes.convert_length(base_line_shift, fs)
-
-            elif c.nodeType == c.ELEMENT_NODE and c.nodeName != "tspan":
-                continue
+                    baseline_shift = convert_len(baseline_shift, fs)
             else:
-                raise Exception("Unexpected node, type=%s, name=%s" % (c.nodeType, c.nodeName))
+                continue
 
-            frag_lengths.append(stringWidth(tx, ff, fs))
-            rl = sum(frag_lengths[:-1])
-
-            try:
-                text = ''.join(frags)
-            except ValueError:
-                text = "Unicode"
-
-            shape = String(x + rl, y - y1 - dy0 + base_line_shift, text)
-
-            self.apply_style(shape, node)
-
-            if c.nodeType == c.ELEMENT_NODE and c.nodeName == "tspan":
-                self.apply_style(shape, c)
+            frag_lengths.append(stringWidth(text, ff, fs))
+            new_x = (x1 + dx) if has_x else (x + dx0 + sum(frag_lengths[:-1]))
+            new_y = (y1 + dy) if has_y else (y + dy0)
+            shape = String(new_x, -(new_y - baseline_shift), text)
+            self.apply_style(to_shape=shape, from_node=node)
+            if node_name(c) == 'tspan':
+                self.apply_style(to_shape=shape, from_node=c)
 
             gr.add(shape)
 
         gr.scale(1, -1)
-        gr.translate(0, -2 * y)
 
         return gr
 
+    def convert_opacity(self, value):
+        return float(value)
+
+    def convert_fill_rule(self, value):
+        return {
+            'nonzero': FILL_NON_ZERO,
+            'evenodd': FILL_EVEN_ODD,
+        }.get(value, '')
+
+    # noinspection PyUnusedLocal
     def convert_path(self, node):
-        """
-        Converts a <path> element's "d" property into an RLG group
-        :type node: Element
-        :rtype Group
-        """
-        assert isinstance(node, Element)
+        normalized_path = utils.normalize_svg_path(node_attr(node, 'd'))
 
-        norm_path = utils.normalize_svg_path(node.getAttribute('d'))
-        pts, ops = [], []
-        last_move_to_op = None
+        path = Path()
+        points = path.points
 
-        for op, nums in utils.pairwise(norm_path):
+        # Track subpaths needing to be closed later
+        unclosed_subpath_pointers = []
+        subpath_start = []
+        last_op = ''
 
-            # moveto, lineto absolute
-            if op in ('M', 'L'):
-                xn, yn = nums
-                pts += [xn, yn]
-                if op == 'M':
-                    ops.append(OP_MOVETO)
-                    last_move_to_op = (op, xn, yn)
-                elif op == 'L':
-                    ops.append(OP_LINETO)
+        for op, nums in utils.pairwise(normalized_path):
 
-            # moveto, lineto relative
+            if op in ('m', 'M') and last_op != '' and path.operators[-1] != OP_CLOSEPATH:
+                unclosed_subpath_pointers.append(len(path.operators))
+
+            # moveto absolute
+            if op == 'M':
+                path.moveTo(*nums)
+                subpath_start = points[-2:]
+
+            # lineto absolute
+            elif op == 'L':
+                path.lineTo(*nums)
+
+            # moveto relative
             elif op == 'm':
-                xn, yn = nums
-                if len(pts) >= 2:
-                    pts = pts + [pts[-2] + xn] + [pts[-1] + yn]
+                if len(points) >= 2:
+                    if last_op in ('Z', 'z'):
+                        starting_point = subpath_start
+                    else:
+                        starting_point = points[-2:]
+                    xn, yn = starting_point[0] + nums[0], starting_point[1] + nums[1]
+                    path.moveTo(xn, yn)
                 else:
-                    pts += [xn, yn]
-                if norm_path[-2] in ('z', 'Z') and last_move_to_op:
-                    pts[-2] = xn + last_move_to_op[-2]
-                    pts[-1] = yn + last_move_to_op[-1]
-                    last_move_to_op = (op, pts[-2], pts[-1])
-                if not last_move_to_op:
-                    last_move_to_op = (op, xn, yn)
-                ops.append(OP_MOVETO)
+                    path.moveTo(*nums)
+                subpath_start = points[-2:]
+
+            # lineto relative
             elif op == 'l':
-                xn, yn = nums
-                pts = pts + [pts[-2] + xn] + [pts[-1] + yn]
-                ops.append(1)
+                xn, yn = points[-2] + nums[0], points[-1] + nums[1]
+                path.lineTo(xn, yn)
 
             # horizontal/vertical line absolute
-            elif op in ('H', 'V'):
-                k = nums[0]
-                if op == 'H':
-                    pts = pts + [k] + [pts[-1]]
-                elif op == 'V':
-                    pts = pts + [pts[-2]] + [k]
-                ops.append(OP_LINETO)
+            elif op == 'H':
+                path.lineTo(nums[0], points[-1])
+            elif op == 'V':
+                path.lineTo(points[-2], nums[0])
 
             # horizontal/vertical line relative
-            elif op in ('h', 'v'):
-                k = nums[0]
-                if op == 'h':
-                    pts = pts + [pts[-2] + k] + [pts[-1]]
-                elif op == 'v':
-                    pts = pts + [pts[-2]] + [pts[-1] + k]
-                ops.append(OP_LINETO)
+            elif op == 'h':
+                path.lineTo(points[-2] + nums[0], points[-1])
+            elif op == 'v':
+                path.lineTo(points[-2], points[-1] + nums[0])
 
             # cubic bezier, absolute
             elif op == 'C':
-                x1, y1, x2, y2, xn, yn = nums
-                pts += [x1, y1, x2, y2, xn, yn]
-                ops.append(OP_CURVETO)
+                path.curveTo(*nums)
             elif op == 'S':
                 x2, y2, xn, yn = nums
-                xp, yp, x0, y0 = pts[-4:]
+                if len(points) < 4 or last_op not in {'c', 'C', 's', 'S'}:
+                    xp, yp, x0, y0 = points[-2:] * 2
+                else:
+                    xp, yp, x0, y0 = points[-4:]
                 xi, yi = x0 + (x0 - xp), y0 + (y0 - yp)
-                # pts = pts + [xcp2, ycp2, x2, y2, xn, yn]
-                pts += [xi, yi, x2, y2, xn, yn]
-                ops.append(OP_CURVETO)
+                path.curveTo(xi, yi, x2, y2, xn, yn)
 
             # cubic bezier, relative
             elif op == 'c':
-                xp, yp = pts[-2:]
+                xp, yp = points[-2:]
                 x1, y1, x2, y2, xn, yn = nums
-                pts += [xp + x1, yp + y1, xp + x2, yp + y2, xp + xn, yp + yn]
-                ops.append(OP_CURVETO)
-
+                path.curveTo(xp + x1, yp + y1, xp + x2, yp + y2, xp + xn, yp + yn)
             elif op == 's':
-                if len(pts) < 4:
-                    xp, yp, x0, y0 = pts[-2:] * 2
-                else:
-                    xp, yp, x0, y0 = pts[-4:]
-                xi, yi = x0 + (x0 - xp), y0 + (y0 - yp)
                 x2, y2, xn, yn = nums
-                pts += [xi, yi, x0 + x2, y0 + y2, x0 + xn, y0 + yn]
-                ops.append(OP_CURVETO)
+                if len(points) < 4 or last_op not in {'c', 'C', 's', 'S'}:
+                    xp, yp, x0, y0 = points[-2:] * 2
+                else:
+                    xp, yp, x0, y0 = points[-4:]
+                xi, yi = x0 + (x0 - xp), y0 + (y0 - yp)
+                path.curveTo(xi, yi, x0 + x2, y0 + y2, x0 + xn, y0 + yn)
 
             # quadratic bezier, absolute
             elif op == 'Q':
-                x0, y0 = pts[-2:]
+                x0, y0 = points[-2:]
                 x1, y1, xn, yn = nums
-                xcp, ycp = x1, y1
-                (_, _), (x1, y1), (x2, y2), (xn, yn) = utils.convert_quadratic_path_to_cubic(
-                    (x0, y0),
-                    (x1, y1),
-                    (xn, yn)
-                )
-                pts += [x1, y1, x2, y2, xn, yn]
-                ops.append(OP_CURVETO)
+                (x0, y0), (x1, y1), (x2, y2), (xn, yn) = \
+                    utils.convert_quadratic_path_to_cubic((x0, y0), (x1, y1), (xn, yn))
+                path.curveTo(x1, y1, x2, y2, xn, yn)
+
             elif op == 'T':
-                xp, yp, x0, y0 = pts[-4:]
-                xi, yi = x0 + (x0 - xcp), y0 + (y0 - ycp)
-                xcp, ycp = xi, yi
+                if len(points) < 4:
+                    xp, yp, x0, y0 = points[-2:] * 2
+                else:
+                    xp, yp, x0, y0 = points[-4:]
+                xi, yi = x0 + (x0 - xp), y0 + (y0 - yp)
                 xn, yn = nums
                 (x0, y0), (x1, y1), (x2, y2), (xn, yn) = \
                     utils.convert_quadratic_path_to_cubic((x0, y0), (xi, yi), (xn, yn))
-                pts += [x1, y1, x2, y2, xn, yn]
-                ops.append(OP_CURVETO)
+                path.curveTo(x1, y1, x2, y2, xn, yn)
 
             # quadratic bezier, relative
             elif op == 'q':
-                x0, y0 = pts[-2:]
+                x0, y0 = points[-2:]
                 x1, y1, xn, yn = nums
                 x1, y1, xn, yn = x0 + x1, y0 + y1, x0 + xn, y0 + yn
-                xcp, ycp = x1, y1
                 (x0, y0), (x1, y1), (x2, y2), (xn, yn) = \
                     utils.convert_quadratic_path_to_cubic((x0, y0), (x1, y1), (xn, yn))
-                pts += [x1, y1, x2, y2, xn, yn]
-                ops.append(OP_CURVETO)
+                path.curveTo(x1, y1, x2, y2, xn, yn)
             elif op == 't':
-                x0, y0 = pts[-2:]
+                if len(points) < 4:
+                    xp, yp, x0, y0 = points[-2:] * 2
+                else:
+                    xp, yp, x0, y0 = points[-4:]
+                x0, y0 = points[-2:]
                 xn, yn = nums
                 xn, yn = x0 + xn, y0 + yn
-                xi, yi = x0 + (x0 - xcp), y0 + (y0 - ycp)
-                xcp, ycp = xi, yi
+                xi, yi = x0 + (x0 - xp), y0 + (y0 - yp)
                 (x0, y0), (x1, y1), (x2, y2), (xn, yn) = \
                     utils.convert_quadratic_path_to_cubic((x0, y0), (xi, yi), (xn, yn))
-                pts += [x1, y1, x2, y2, xn, yn]
-                ops.append(OP_CURVETO)
+                path.curveTo(x1, y1, x2, y2, xn, yn)
 
+            # elliptical arc
+            elif op in ('A', 'a'):
+                rx, ry, phi, fA, fS, x2, y2 = nums
+                x1, y1 = points[-2:]
+                if op == 'a':
+                    x2 += x1
+                    y2 += y1
+                if abs(rx) <= 1e-10 or abs(ry) <= 1e-10:
+                    path.lineTo(x2, y2)
+                else:
+                    bp = utils.bezier_arc_from_end_points(x1, y1, rx, ry, phi, fA, fS, x2, y2)
+                    for _, _, x1, y1, x2, y2, xn, yn in bp:
+                        path.curveTo(x1, y1, x2, y2, xn, yn)
+
+            # close path
             elif op in ('Z', 'z'):
-                # close path
-                ops.append(OP_CLOSEPATH)
+                path.closePath()
 
             else:
-                # arcs
-                if op in ('A', 'a'):
-                    pts = pts + nums[-2:]
-                    ops.append(OP_LINETO)
-                else:
-                    print("Unknown Path Operator:", op)
+                _logger.debug("Suspicious path operator: %s" % op)
+            last_op = op
 
-        # hack because RLG has no "semi-closed" paths...
         gr = Group()
-        if ops[-1] == OP_CLOSEPATH:  # if ends with a close path...
-            shape1 = Path(pts, ops)
-            self.apply_style(shape1, node, defaults={"fill": colors.black, "stroke": None})
-            if not attributes.find(node, "fill"):
-                shape1.fillColor = colors.black
+        self.apply_style(path, node)
 
-            if not attributes.find(node, "stroke"):
-                shape1.strokeColor = None
+        if path.operators[-1] != OP_CLOSEPATH:
+            unclosed_subpath_pointers.append(len(path.operators))
 
-            gr.add(shape1)
-        else:
-            shape1 = Path(pts, ops + [OP_CLOSEPATH])
-            self.apply_style(shape1, node)
+        if unclosed_subpath_pointers and path.fillColor is not None:
+            # ReportLab doesn't fill unclosed paths, so we are creating a copy
+            # of the path with all subpaths closed, but without stroke.
+            # https://bitbucket.org/rptlab/reportlab/issues/99/
+            closed_path = NoStrokePath(copy_from=path)
+            for pointer in reversed(unclosed_subpath_pointers):
+                closed_path.operators.insert(pointer, OP_CLOSEPATH)
+            gr.add(closed_path)
+            path.fillColor = None
 
-            shape1.strokeColor = None
-            if not attributes.find(node, "fill"):
-                shape1.fillColor = colors.black
-            gr.add(shape1)
-
-            shape2 = Path(pts, ops)
-            self.apply_style(shape2, node)
-            shape2.fillColor = None
-
-            if not attributes.find(node, "stroke"):
-                shape2.strokeColor = None
-            gr.add(shape2)
-
-        # debugging in case we try to replace this path parsing with a better version that doesn't crash so much
-        # from svg.path import parse_path
-        # print("-" * 200)
-        # print("original :", node.getAttribute('d'))
-        # print("parsed   :", parse_path(node.getAttribute('d')).d())
-        # print("  ops    :", ops)
-        # print("  pts    :", pts)
-        # original: M 63.223676,253.416 A 135,135 0 0 1 63.223675, 46.583998 L 150,150 z
-        # parsed  : M 63.2237,  253.416 A 135,135 0 0,1 63.2237,   46.584 L 150,150 Z
-
+        gr.add(path)
         return gr
 
     def convert_image(self, node):
-        _logger.debug("Adding box instead of image")
+        _logger.warn("Adding box instead of image.")
 
-        x, y, width, height = self._length_attrs(node, 'x', 'y', 'width', 'height')
-
-        xlink_href = utils.enc(node.getAttributeNS("http://www.w3.org/1999/xlink", "href"))
-        xlink_href = os.path.join(os.path.dirname(self.svgSourceFile), xlink_href)
+        x, y, width, height = self._length_attrs(node, ('x', 'y', "width", "height"))
+        xlink_href = utils.node_xlink_href(node)
 
         magic = "data:image/jpeg;base64"
-
         if xlink_href[:len(magic)] == magic:
             pat = "data:image/(\w+?);base64"
             ext = re.match(pat, magic).groups()[0]
-            jpeg_data = base64.decodestring(xlink_href[len(magic):])
-            hash_val = hashlib.md5(jpeg_data).hexdigest()
-            name = "images/img%s.%s" % (hash_val, ext)
-            path = os.path.join(dirname(self.svgSourceFile), name)
-            open(path, "wb").write(jpeg_data)
-            img = Image(x, y + height, width, -height, path)
+            jpeg_data = base64.decodestring(xlink_href[len(magic):].encode('ascii'))
+            _, path = tempfile.mkstemp(suffix='.%s' % ext)
+            with open(path, b'wb') as fh:
+                fh.write(jpeg_data)
+            img = Image(int(x), int(y + height), int(width), int(-height), path)
             # this needs to be removed later, not here...
             # if exists(path): os.remove(path)
         else:
-            xlink_href = os.path.join(dirname(self.svgSourceFile), xlink_href)
-            img = Image(x, y + height, width, -height, xlink_href)
-
+            xlink_href = os.path.join(os.path.dirname(self.svg_source_file), xlink_href)
+            img = Image(int(x), int(y + height), int(width), int(-height), xlink_href)
+            try:
+                # this will catch invalid image
+                PDFImage(xlink_href, 0, 0)
+            except IOError:
+                _logger.error("Unable to read the image %s. Skipping..." % img.path)
+                return None
         return img
 
-    @staticmethod
-    def apply_transform(transform, group):
+    def apply_transform(self, transform, group):
         """
         Apply an SVG transformation to a RL Group shape.
 
@@ -433,10 +462,9 @@ class ShapeConverter(object):
                     values = (values, values)
                 group.scale(*values)
             elif op == "translate":
-                try:
-                    values = values[0], values[1]
-                except TypeError:
-                    return
+                if isinstance(values, (int, float)):
+                    # From the SVG spec: If <ty> is not provided, it is assumed to be zero.
+                    values = values, 0
                 group.translate(*values)
             elif op == "rotate":
                 if not isinstance(values, tuple) or len(values) == 1:
@@ -455,8 +483,7 @@ class ShapeConverter(object):
             else:
                 _logger.debug("Ignoring unknown transform: %s %s" % (op, values))
 
-    @staticmethod
-    def apply_style(to_shape, from_node, defaults=None):
+    def apply_style(self, to_shape, from_node, only_explicit=False):
         """
         Apply styles from SVG elements to an RLG shape.
         """
@@ -465,10 +492,13 @@ class ShapeConverter(object):
 
         # tuple format: (svgAttr, rlgAttr, converter, default)
         mapping_n = (
-            ("fill", "fillColor", "convert_color", "none"),
+            ("fill", "fillColor", "convert_color", "black"),
             ("fill-opacity", "fillOpacity", "convert_opacity", 1),
             ("stroke", "strokeColor", "convert_color", "none"),
-            ("stroke-width", "strokeWidth", "convert_length", "0"),
+            ("fill-rule", "_fillRule", "convert_fill_rule", "nonzero"),
+            ("stroke", "strokeColor", "convert_color", "none"),
+            ("stroke-width", "strokeWidth", "convert_length", "1"),
+            ("stroke-opacity", "strokeOpacity", "convert_opacity", 1),
             ("stroke-linejoin", "strokeLineJoin", "convert_line_join", "0"),
             ("stroke-linecap", "strokeLineCap", "convert_line_cap", "0"),
             ("stroke-dasharray", "strokeDashArray", "convert_dash_array", "none"),
@@ -479,23 +509,33 @@ class ShapeConverter(object):
             ("text-anchor", "textAnchor", "identity", "start"),
         )
 
-        ac = attributes
+        if to_shape.__class__ == Group:
+            # Recursively apply style on Group subelements
+            for subshape in to_shape.contents:
+                self.apply_style(subshape, from_node, only_explicit=only_explicit)
+            return
 
         for mapping in (mapping_n, mapping_f):
             # values in mapping_f ONLY apply to strings, so skip if other shape
             if to_shape.__class__ != String and mapping == mapping_f:
                 continue
 
-            for (svgAttrName, rlgAttr, func, default) in mapping:
+            for (svg_attr_name, rlg_attr, func, default) in mapping:
+                value = attributes.find(from_node, svg_attr_name)
+                if value == '':
+                    if only_explicit:
+                        continue
+                    value = default
+
+                if value == "currentColor":
+                    value = attributes.find(from_node.parentNode, "color") or default
+
                 try:
-                    value = attributes.find(from_node, svgAttrName) or default
-                    if value == "currentColor":
-                        value = attributes.find(from_node.parentNode, "color") or default
-                    method = getattr(ac, func)
-                    setattr(to_shape, rlgAttr, method(value))
-                except:
+                    conversion_func = getattr(attributes, func)
+                    setattr(to_shape, rlg_attr, conversion_func(value))
+                except (AttributeError, KeyError, ValueError):
                     pass
 
-        if to_shape.__class__ == String:
-            svg_attr = attributes.find(from_node, "fill") or "black"
-            setattr(to_shape, "fillColor", attributes.convert_color(svg_attr))
+        if getattr(to_shape, 'fillOpacity', None):
+            if getattr(to_shape, 'fillColor', None):
+                to_shape.fillColor.alpha = to_shape.fillOpacity

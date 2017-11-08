@@ -1,0 +1,2 @@
+reportlab>=3.0.0
+lxml

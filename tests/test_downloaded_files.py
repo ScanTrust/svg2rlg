@@ -2,17 +2,21 @@
 # -*- coding: UTF-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
+import gzip
+import io
 import os
 import re
 import sys
+import tarfile
 import traceback
 import unittest
-from os.path import basename
+from os.path import basename, splitext
 from unittest.case import skipIf
 
 from requests.utils import unquote
 
 from svg2rlg import file_to_rlg
+from svg2rlg.utils import b
 from tests import utils
 from tests.utils import fetch_file
 
@@ -21,7 +25,8 @@ from tests.utils import fetch_file
 # Funny looking test classes which test svg conversion on a wide variety of files,
 # some of which are downloaded from wikipedia and/or others in the future.
 #
-# ** All files in samples/download and subdirectories are tested
+# ** All files in samples/download and subdirectories are tested.
+# ** To stop a test from being run, delete the directory in /downloads/
 # ** All files in samples/misc are tested as well, 1 level deep only
 #
 # Custom test classes are dynamically created so that we get one test_case_method
@@ -30,14 +35,22 @@ from tests.utils import fetch_file
 # Note:
 #
 # If you don't have the files locally, add them by passing in the environment var `DL`
+# on the first run
+#
 #    $ DL=True python -m unittest discover
+#
+# Since the WC3 tests don't work automatically,
+#    $ W3C=True python -m unittest discover
+#
 #
 
 try:
     DL_EXTRA = os.environ.get('DL', False)
+    USE_W3C = os.environ.get('W3C', False)
     import requests
 except:
     DL_EXTRA = False
+    USE_W3C = False
 
 # --------------------------------------------------------------------------
 # download all the files if DL is turned on (skipping if they already exist)
@@ -51,7 +64,7 @@ if DL_EXTRA:
             dest_folder="wiki-flags",
             dest_file="flags.html"
         )
-        with open(flags_file, b"rt") as f:
+        with open(flags_file, b("rt")) as f:
             flags_data = f.read()
 
         # Find the "a href = "/wiki/File:(flag name)" here
@@ -60,6 +73,18 @@ if DL_EXTRA:
             fn = re.sub("[^\w.]", '__', fn).lower().replace("flag_of_", "")
             url = url.replace("/thumb", "")
             fetch_file("http://upload.wikimedia.org", url, "wiki-flags", fn)
+
+
+    def download_wc3_test_suite():
+        wc3_file = fetch_file(
+            server="http://www.w3.org",
+            server_path="/Graphics/SVG/Test/20070907/W3C_SVG_12_TinyTestSuite.tar.gz",
+            dest_folder="w3c-tiny",
+            dest_file="TestSuite.tar.gz",
+            large=True
+        )
+        tar_arc = tarfile.open(wc3_file)
+        tar_arc.extractall(os.path.dirname(wc3_file))
 
 
     def download_specific_files():
@@ -85,6 +110,8 @@ if DL_EXTRA:
 
     download_specific_files()
     download_wiki_flags()
+    if USE_W3C:
+        download_wc3_test_suite()
 
 
 def create_test_class_for_dir(class_name, base_directory):
@@ -97,7 +124,7 @@ def create_test_class_for_dir(class_name, base_directory):
     class TestTheStuff(unittest.TestCase):
         pass
 
-    TestTheStuff.__name__ = class_name
+    TestTheStuff.__name__ = b(class_name)
 
     def add_test(file_full_path):
         dir, method_name = os.path.split(file_full_path)
@@ -130,7 +157,7 @@ def create_test_class_for_dir(class_name, base_directory):
                     locals_dump
                 ]))
 
-        test_method.name = method_name
+        test_method.name = b(method_name)
         setattr(TestTheStuff, test_method.name, test_method)
 
     # walk all files in the directory itself (for the manual test cases)
@@ -143,9 +170,10 @@ def create_test_class_for_dir(class_name, base_directory):
     return TestTheStuff
 
 
-TestDownloadedFiles = create_test_class_for_dir(b"TestDownloadedFiles", utils.LOCAL_DOWNLOAD_DIR)
-TestMiscFiles = create_test_class_for_dir(b"TestMiscFiles", utils.MISC_SAMPLES_DIR)
+TestMiscFiles = create_test_class_for_dir("TestMiscFiles", utils.SAMPLES_MISC)
 
-# -
-# todo: Add a test which downloads the W3C test suite
-#       https://www.w3.org/Graphics/SVG/Test/20070907/W3C_SVG_12_TinyTestSuite.tar.gz
+# test cases for downloaded files
+TestWikiCommons = create_test_class_for_dir("TestDownloadedFiles", utils.DL_WIKI_COMMONS)
+TestWikiFlags = create_test_class_for_dir("TestDownloadedFiles", utils.DL_WIKI_FLAGS)
+if USE_W3C:
+    TestW3C = create_test_class_for_dir("TestW3C", utils.DL_W3C_TINY)
