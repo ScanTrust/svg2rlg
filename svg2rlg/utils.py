@@ -533,14 +533,14 @@ def monkeypatch_reportlab():
     original_render_path = shapes._renderPath
 
     # noinspection PyPep8Naming
-    def patched_render_path(path, drawFuncs):
+    def patched_render_path(path, drawFuncs, **kwargs):
         # Patched method to transfer fillRule from Path to PDFPathObject
         # Get back from bound method to instance
         try:
             drawFuncs[0].__self__.fillMode = path._fillRule
         except AttributeError:
             pass
-        return original_render_path(path, drawFuncs)
+        return original_render_path(path, drawFuncs, **kwargs)
 
     shapes._renderPath = patched_render_path
 
