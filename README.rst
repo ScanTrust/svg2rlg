@@ -4,6 +4,15 @@
 Svglib
 ========
 
+---------------------------------------------------------------------------
+A pure-Python library for reading and converting SVG
+---------------------------------------------------------------------------
+
+|ci|
+
+.. |ci| image:: http://img.shields.io/travis/scantrust/svg2rlg.svg
+  :target: https://travis-ci.org/scantrust/svg2rlg
+
 -------------------------------------------------------------------------
 ScanTrust Fork of: https://github.com/deeplook/svglib
 Originally From:   https://github.com/sweh/svglib
@@ -13,10 +22,11 @@ but is largely derived from `deeplook/svglib` which is from `sweh` original.
 
 It is packaged as `svg2rlg` and can be found in the ScanTrust pypi.
 
-* Requires lxml
-* Handles `<use>` and other types of references properly
-* Proper clipping support for Path and Rect data
-* Many other spec-matching improvements (thanks deeplook!)
+- Requires lxml
+- Handles `<use>` and other types of references properly
+- Proper clipping support for Path and Rect data
+- Many other spec-matching improvements (thanks deeplook!)
+
 -------------------------------------------------------------------------
 
 

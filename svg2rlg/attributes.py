@@ -7,7 +7,6 @@ import re
 from reportlab.lib import colors, units
 from reportlab.pdfgen.canvas import FILL_NON_ZERO, FILL_EVEN_ODD
 
-from svg2rlg.utils import pad_list, enc, node_name
 from . import utils, settings
 
 _logger = logging.getLogger(__name__)
@@ -40,7 +39,7 @@ def find(node, name):
 
 def get_all(node):
     values = {}
-    if node_name(node.getparent()) == 'g':
+    if utils.node_name(node.getparent()) == 'g':
         values.update(get_all(node.getparent()))
 
     style = node.attrib.get("style")
@@ -232,7 +231,7 @@ def parse_multi_attribute_string(line):
     """
     Parse an attribute string in the format "name:value;name2:value2;name3:value3..." into a dict
     """
-    line = enc(line)
+    line = utils.enc(line)
     pairs = [a.strip() for a in line.split(';') if a]
     pairs = [[e.strip() for e in a.split(':')] for a in pairs]
     return {k: v for k, v in pairs}

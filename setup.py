@@ -4,9 +4,8 @@ from __future__ import print_function, absolute_import, unicode_literals
 import os.path
 import sys
 
+import re
 from setuptools import setup, find_packages
-
-import svg2rlg
 
 
 def project_path(*names):
@@ -28,9 +27,16 @@ v = sys.version_info
 if (v.major, v.minor) < (2, 7):
     install_requires.append('argparse')
 
+
+def get_version():
+    """Parses the __version__ so we don't have to maintain in 2 locations"""
+    for m in re.findall("__version__\s*=\s*\"(\d+.\d+.\d+)\"", read("svg2rlg/__init__.py")):
+        return m
+
+
 setup(
     name='svg2rlg',
-    version=svg2rlg.VERISON,
+    version=get_version(),
     install_requires=install_requires,
     author='Sebastian Wehrmann, Dinu Gherman, Deeplook, ScanTrust',
     author_email='sebastian.wehrmann@icloud.com, gherman@darwin.in-berlin.de, andrew.backer@scantrust.com',
