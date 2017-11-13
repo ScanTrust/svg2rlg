@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 
-FONT_MAP = {
+import os
+from reportlab.pdfbase import pdfmetrics, ttfonts
+
+FONT_ALIASES = {
     "sans-serif": "Helvetica",
     "serif": "Times-Roman",
     "monospace": "Courier",
 }
 
-# should be one of the font names (not keys) in the map
 DEFAULT_FONT = 'Helvetica'
 
 __all__ = [
-    'FONT_MAP',
-    'DEFAULT_FONT'
+    'FONT_ALIASES',
+    'DEFAULT_FONT',
 ]
