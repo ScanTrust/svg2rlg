@@ -5,6 +5,7 @@ import logging
 import re
 
 from reportlab.lib import colors, units
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen.canvas import FILL_NON_ZERO, FILL_EVEN_ODD
 
 from . import utils, settings
@@ -217,14 +218,21 @@ def convert_font_family(value):
     if not value:
         return ''
 
-    # try to get the mapping, in case they used a built-in shortcut (e.g. sans-serif)
-    font_name = settings.FONT_MAP.get(value, value)
+    value = value.replace("'", "")  # strip single quotes, e.g. 'Arial-Bold'
 
-    # ensure that the font name is one of the valid names from the map
-    if font_name not in settings.FONT_MAP.values():
-        font_name = settings.DEFAULT_FONT
+    # todo: cache this mapping, rebuilding it each time rendering starts
+    if value in pdfmetrics.getRegisteredFontNames():
+        return value
 
-    return font_name
+    # if this font name is already known to us, then just return it
+    if value in settings.FONT_ALIASES:
+        return settings.FONT_ALIASES[value]
+
+    if value in settings.FONT_ALIASES.values():
+        return value
+
+    # couldn't find it, so use the default font
+    return settings.DEFAULT_FONT
 
 
 def parse_multi_attribute_string(line):
